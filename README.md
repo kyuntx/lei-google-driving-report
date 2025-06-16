@@ -42,19 +42,74 @@ python-dateutil
 4. OAuth2認証情報を作成し、`credentials.json`としてダウンロード
 5. Google Maps API キーを作成
 
-### 2. アプリケーションの設定
+### 2. 通常のセットアップ（Python直接実行）
 
 1. リポジトリをクローン
 2. `credentials.json`をプロジェクトルートに配置
 3. 必要なライブラリをインストール：
    ```bash
-   pip install flask google-auth google-auth-oauthlib google-api-python-client googlemaps python-dateutil
+   pip install -r requirements.txt
+   ```
+4. 環境設定（オプション）：
+   ```bash
+   cp .env.example .env
+   # .envファイルを編集してSECRET_KEYなどを設定
+   ```
+5. 実行：
+   ```bash
+   python app.py
    ```
 
-### 3. 実行
+### 3. Dockerを使用したセットアップ（推奨）
+
+#### 前提条件
+- Docker
+- Docker Compose
+
+#### 手順
+
+1. リポジトリをクローン：
+   ```bash
+   git clone https://github.com/kyuntx/lei-google-driving-report.git
+   cd lei-google-driving-report
+   ```
+
+2. `credentials.json`をプロジェクトルートに配置
+
+3. 環境設定：
+   ```bash
+   cp .env.example .env
+   # .envファイルを編集してSECRET_KEYなどを設定
+   ```
+
+4. Dockerコンテナでアプリケーションを起動：
+   ```bash
+   # バックグラウンドで起動
+   docker-compose up -d
+   
+   # ログを確認
+   docker-compose logs -f
+   ```
+
+5. アプリケーションにアクセス：
+   ```
+   http://localhost:5000
+   ```
+
+#### Docker関連のコマンド
 
 ```bash
-python app.py
+# アプリケーションを停止
+docker-compose down
+
+# イメージを再ビルド
+docker-compose build
+
+# コンテナの状態確認
+docker-compose ps
+
+# ログ確認
+docker-compose logs lei-driving-report
 ```
 
 アプリケーションは `http://localhost:5000` で起動します。
@@ -112,9 +167,15 @@ lei-google-driving-report/
 ├── templates/
 │   ├── index.html        # メインページ
 │   └── report.html       # レポート表示ページ
-├── credentials.json      # Google API認証情報（要設定）
-├── CLAUDE.md            # 開発者向けドキュメント
-└── README.md            # このファイル
+├── requirements.txt      # Python依存関係
+├── Dockerfile           # Dockerイメージ定義
+├── docker-compose.yml   # Docker Compose設定
+├── .dockerignore        # Docker除外ファイル
+├── .gitignore           # Git除外ファイル
+├── .env.example         # 環境変数テンプレート
+├── credentials.json     # Google API認証情報（要設定）
+├── CLAUDE.md           # 開発者向けドキュメント
+└── README.md           # このファイル
 ```
 
 ## 注意事項

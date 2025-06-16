@@ -1,0 +1,8 @@
+Flask==3.0.0
+google-auth==2.23.4
+google-auth-oauthlib==1.1.0
+google-api-python-client==2.108.0
+googlemaps==4.10.0
+python-dateutil==2.8.2
+python-dotenv==1.0.0
+Werkzeug==3.0.1

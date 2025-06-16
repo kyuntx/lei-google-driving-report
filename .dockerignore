@@ -1,0 +1,64 @@
+# Git関連
+.git
+.gitignore
+
+# Python関連
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+
+# 仮想環境
+venv/
+env/
+ENV/
+.venv/
+
+# IDE・エディタ関連
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ログファイル
+*.log
+logs/
+
+# 機密情報（必要な場合は個別にCOPY）
+credentials.json
+token.json
+.env
+.env.local
+.env.production
+
+# 一時ファイル
+*.tmp
+*.temp
+temp/
+tmp/
+
+# バックアップファイル
+*.bak
+*.backup
+*~
+
+# CSVエクスポートファイル
+*.csv
+
+# Dockerファイル
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# ドキュメント（必要な場合は個別にCOPY）
+README.md
+
+# システムファイル
+.Trashes
+ehthumbs.db

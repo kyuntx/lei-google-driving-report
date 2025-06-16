@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  lei-driving-report:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lei-driving-report
+    ports:
+      - "5000:5000"
+    environment:
+      # Flask設定
+      - SECRET_KEY=${SECRET_KEY:-your_secret_key_change_this_in_production}
+      - DEBUG=${DEBUG:-True}
+      
+      # OAuth設定（開発環境用）
+      - OAUTHLIB_INSECURE_TRANSPORT=${OAUTHLIB_INSECURE_TRANSPORT:-1}
+      
+      # タイムゾーン設定
+      - TZ=Asia/Tokyo
+    
+    volumes:
+      # Google認証情報ファイルをマウント
+      - ./credentials.json:/app/credentials.json:ro
+      
+      # 開発時のコード変更を反映（開発環境のみ）
+      - ./app.py:/app/app.py:ro
+      - ./templates:/app/templates:ro
+      
+      # ログ出力用
+      - ./logs:/app/logs
+    
+    # 環境変数ファイルを読み込み
+    env_file:
+      - .env
+    
+    # ヘルスチェック
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+    # 再起動ポリシー
+    restart: unless-stopped
+    
+    # ネットワーク設定
+    networks:
+      - lei-network
+
+# カスタムネットワークを定義
+networks:
+  lei-network:
+    driver: bridge
+
+# ボリューム定義（必要に応じて）
+volumes:
+  logs:
+    driver: local

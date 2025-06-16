@@ -1,6 +1,14 @@
 from flask import Flask, render_template, request, redirect, url_for, session, send_file
 import os
 
+# .envファイルから環境変数を読み込み
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    # python-dotenvがインストールされていない場合はスキップ
+    pass
+
 # セキュリティ設定：開発環境でのHTTP使用を環境変数で制御
 # 本番環境では '0' または未設定にしてHTTPSを強制すること
 if os.environ.get('OAUTHLIB_INSECURE_TRANSPORT', '0') == '1':
