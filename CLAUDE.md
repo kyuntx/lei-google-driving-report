@@ -12,6 +12,7 @@ This is a Flask web application that generates driving reports by integrating wi
 - **Templates**: HTML templates using Bootstrap for UI and Jinja2 templating
   - `templates/index.html` - Main form for authentication and report generation
   - `templates/report.html` - Report display with tabular data and CSV download
+  - `templates/cache.html` - Cache management interface for viewing/editing geocoding cache
 
 ## Key Components
 
@@ -23,9 +24,16 @@ This is a Flask web application that generates driving reports by integrating wi
 ### Data Processing Pipeline
 1. Extract driving events from Google Calendar (events with "距離" in title)
 2. Parse distance and fuel efficiency from event titles using regex
-3. Convert coordinates to addresses using Google Maps reverse geocoding
+3. Convert coordinates to addresses using Google Maps reverse geocoding with intelligent caching
 4. Calculate trip duration and format data for display
 5. Export to Shift_JIS CSV for Excel compatibility
+
+### Geocoding Cache System
+- **Database**: SQLite database (`geocoding_cache.db`) for persistent cache storage
+- **Precision**: Coordinates rounded to 4 decimal places (≈11m accuracy) for cache efficiency
+- **Cache Functions**: `init_cache_db()`, `get_cached_address()`, `cache_address()`
+- **Management Routes**: `/cache`, `/cache/delete/<id>`, `/cache/update/<id>`, `/cache/clear`
+- **API Cost Reduction**: Avoids duplicate Google Maps API calls for identical coordinates
 
 ### Required External Services
 - Google Calendar API (requires `credentials.json` file)
@@ -47,12 +55,14 @@ The application requires:
 - Google API client libraries (`google-auth`, `google-auth-oauthlib`, `google-api-python-client`)
 - Google Maps client (`googlemaps`)
 - Date handling (`python-dateutil`)
+- SQLite3 and hashlib (standard libraries) for geocoding cache
 
 ## Configuration Requirements
 
 1. **credentials.json**: Google OAuth2 credentials file (not in repo)
 2. **Google Maps API Key**: Required for reverse geocoding functionality
-3. **Secret Key**: Currently hardcoded in app.py (line 20) - should be environment variable in production
+3. **Secret Key**: Environment variable `SECRET_KEY` (defaults to development key)
+4. **Cache Database**: SQLite file `geocoding_cache.db` (auto-created, excluded from git)
 
 ## Data Format Expectations
 

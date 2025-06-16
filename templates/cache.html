@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>キャッシュ管理 - Lei03/Lei03+/Lei04 運転日報ジェネレータ</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        .table-responsive {
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+        .edit-mode {
+            background-color: #fff3cd;
+        }
+        .coordinate-cell {
+            font-family: 'Courier New', monospace;
+            font-size: 0.85em;
+        }
+        .cache-stats {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container mt-4">
+        <!-- ヘッダー -->
+        <div class="row mb-4">
+            <div class="col">
+                <h1 class="h2"><i class="bi bi-database-gear"></i> キャッシュ管理</h1>
+                <nav aria-label="breadcrumb">
+                    <ol class="breadcrumb">
+                        <li class="breadcrumb-item"><a href="{{ url_for('index') }}">ホーム</a></li>
+                        <li class="breadcrumb-item active">キャッシュ管理</li>
+                    </ol>
+                </nav>
+            </div>
+        </div>
+
+        <!-- フラッシュメッセージ -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ 'success' if category == 'success' else 'danger' }} alert-dismissible fade show" role="alert">
+                        <i class="bi bi-{{ 'check-circle' if category == 'success' else 'exclamation-triangle' }}"></i>
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <!-- キャッシュ統計 -->
+        <div class="cache-stats">
+            <div class="row">
+                <div class="col-md-4 text-center">
+                    <h3 class="mb-0">{{ total_count or cache_entries|length }}</h3>
+                    <small>総キャッシュ数</small>
+                </div>
+                <div class="col-md-4 text-center">
+                    <h3 class="mb-0"><i class="bi bi-hdd"></i></h3>
+                    <small>SQLiteデータベース</small>
+                </div>
+                <div class="col-md-4 text-center">
+                    <h3 class="mb-0"><i class="bi bi-speedometer2"></i></h3>
+                    <small>API使用量削減</small>
+                </div>
+            </div>
+        </div>
+
+        <!-- アクションボタン -->
+        <div class="row mb-3">
+            <div class="col">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <button class="btn btn-primary me-2" onclick="location.reload()">
+                            <i class="bi bi-arrow-clockwise"></i> 更新
+                        </button>
+                        <span class="text-muted">最終更新: <span id="currentTime"></span></span>
+                    </div>
+                    <div>
+                        {% if cache_entries %}
+                        <button class="btn btn-outline-danger" onclick="clearAllCache()">
+                            <i class="bi bi-trash"></i> 全削除
+                        </button>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- キャッシュテーブル -->
+        {% if cache_entries %}
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-table"></i> キャッシュエントリ一覧</h5>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-dark">
+                            <tr>
+                                <th style="width: 100px;">座標</th>
+                                <th style="width: 40%;">住所</th>
+                                <th style="width: 150px;">作成日時</th>
+                                <th style="width: 120px;">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for entry in cache_entries %}
+                            <tr id="row-{{ entry.hash }}">
+                                <td class="coordinate-cell">
+                                    <small>
+                                        <strong>緯度:</strong> {{ "%.5f"|format(entry.latitude) }}<br>
+                                        <strong>経度:</strong> {{ "%.5f"|format(entry.longitude) }}
+                                    </small>
+                                    <br>
+                                    <a href="https://www.google.com/maps?q={{ entry.latitude }},{{ entry.longitude }}" 
+                                       target="_blank" class="btn btn-sm btn-outline-secondary mt-1">
+                                        <i class="bi bi-geo-alt"></i> 地図
+                                    </a>
+                                </td>
+                                <td>
+                                    <div id="address-display-{{ entry.hash }}">{{ entry.address }}</div>
+                                    <div id="address-edit-{{ entry.hash }}" style="display: none;">
+                                        <div class="input-group">
+                                            <input type="text" class="form-control" 
+                                                   value="{{ entry.address }}" 
+                                                   id="address-input-{{ entry.hash }}">
+                                            <button class="btn btn-success" onclick="saveAddress('{{ entry.hash }}')">
+                                                <i class="bi bi-check"></i>
+                                            </button>
+                                            <button class="btn btn-secondary" onclick="cancelEdit('{{ entry.hash }}')">
+                                                <i class="bi bi-x"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td>
+                                    <small>{{ entry.created_at }}</small>
+                                </td>
+                                <td>
+                                    <div class="btn-group" role="group">
+                                        <button class="btn btn-sm btn-outline-primary" 
+                                                onclick="editAddress('{{ entry.hash }}')"
+                                                id="edit-btn-{{ entry.hash }}">
+                                            <i class="bi bi-pencil"></i>
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-danger" 
+                                                onclick="deleteEntry('{{ entry.hash }}')">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <!-- ページネーション -->
+            {% if total_pages and total_pages > 1 %}
+            <div class="card-footer">
+                <nav aria-label="キャッシュエントリページネーション">
+                    <ul class="pagination justify-content-center mb-0">
+                        {% if current_page > 1 %}
+                        <li class="page-item">
+                            <a class="page-link" href="{{ url_for('cache_management', page=current_page-1, per_page=per_page) }}">前へ</a>
+                        </li>
+                        {% endif %}
+                        
+                        {% for page_num in range(1, total_pages + 1) %}
+                            {% if page_num == current_page %}
+                            <li class="page-item active">
+                                <span class="page-link">{{ page_num }}</span>
+                            </li>
+                            {% elif page_num == 1 or page_num == total_pages or (current_page - 2 <= page_num <= current_page + 2) %}
+                            <li class="page-item">
+                                <a class="page-link" href="{{ url_for('cache_management', page=page_num, per_page=per_page) }}">{{ page_num }}</a>
+                            </li>
+                            {% elif page_num == current_page - 3 or page_num == current_page + 3 %}
+                            <li class="page-item disabled">
+                                <span class="page-link">...</span>
+                            </li>
+                            {% endif %}
+                        {% endfor %}
+                        
+                        {% if current_page < total_pages %}
+                        <li class="page-item">
+                            <a class="page-link" href="{{ url_for('cache_management', page=current_page+1, per_page=per_page) }}">次へ</a>
+                        </li>
+                        {% endif %}
+                    </ul>
+                </nav>
+                <div class="text-center mt-2">
+                    <small class="text-muted">
+                        {{ ((current_page - 1) * per_page) + 1 }} - {{ current_page * per_page if current_page * per_page <= total_count else total_count }} / {{ total_count }} 件
+                    </small>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+        {% else %}
+        <div class="text-center py-5">
+            <i class="bi bi-database-x display-1 text-muted"></i>
+            <h3 class="text-muted mt-3">キャッシュエントリがありません</h3>
+            <p class="text-muted">運転日報を生成すると、リバースジオコーディング結果がここに表示されます。</p>
+            <a href="{{ url_for('index') }}" class="btn btn-primary">
+                <i class="bi bi-arrow-left"></i> ホームに戻る
+            </a>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- JavaScript -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        function editAddress(hash) {
+            document.getElementById('address-display-' + hash).style.display = 'none';
+            document.getElementById('address-edit-' + hash).style.display = 'block';
+            document.getElementById('edit-btn-' + hash).disabled = true;
+            document.getElementById('row-' + hash).classList.add('edit-mode');
+        }
+
+        function cancelEdit(hash) {
+            document.getElementById('address-display-' + hash).style.display = 'block';
+            document.getElementById('address-edit-' + hash).style.display = 'none';
+            document.getElementById('edit-btn-' + hash).disabled = false;
+            document.getElementById('row-' + hash).classList.remove('edit-mode');
+        }
+
+        function saveAddress(hash) {
+            const newAddress = document.getElementById('address-input-' + hash).value.trim();
+            if (!newAddress) {
+                alert('住所を入力してください。');
+                return;
+            }
+
+            fetch(`/cache/update/${hash}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ address: newAddress })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    document.getElementById('address-display-' + hash).textContent = newAddress;
+                    cancelEdit(hash);
+                    showAlert('住所を更新しました。', 'success');
+                } else {
+                    alert('更新に失敗しました: ' + (data.error || '不明なエラー'));
+                }
+            })
+            .catch(error => {
+                alert('更新に失敗しました: ' + error);
+            });
+        }
+
+        function deleteEntry(hash) {
+            if (!confirm('このキャッシュエントリを削除しますか？')) {
+                return;
+            }
+
+            fetch(`/cache/delete/${hash}`, {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    document.getElementById('row-' + hash).remove();
+                    showAlert('キャッシュエントリを削除しました。', 'success');
+                    
+                    // テーブルが空になった場合はページを再読み込み
+                    if (document.querySelectorAll('tbody tr').length === 0) {
+                        location.reload();
+                    }
+                } else {
+                    alert('削除に失敗しました: ' + (data.error || '不明なエラー'));
+                }
+            })
+            .catch(error => {
+                alert('削除に失敗しました: ' + error);
+            });
+        }
+
+        function clearAllCache() {
+            if (!confirm('全てのキャッシュエントリを削除しますか？\nこの操作は元に戻せません。')) {
+                return;
+            }
+
+            fetch('/cache/clear', {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    location.reload();
+                } else {
+                    alert('削除に失敗しました: ' + (data.error || '不明なエラー'));
+                }
+            })
+            .catch(error => {
+                alert('削除に失敗しました: ' + error);
+            });
+        }
+
+        function showAlert(message, type) {
+            const alertDiv = document.createElement('div');
+            alertDiv.className = `alert alert-${type} alert-dismissible fade show`;
+            alertDiv.innerHTML = `
+                <i class="bi bi-${type === 'success' ? 'check-circle' : 'exclamation-triangle'}"></i>
+                ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            `;
+            
+            const container = document.querySelector('.container');
+            container.insertBefore(alertDiv, container.children[1]);
+            
+            // 3秒後に自動で閉じる
+            setTimeout(() => {
+                alertDiv.remove();
+            }, 3000);
+        }
+
+        // 現在時刻を表示
+        function updateCurrentTime() {
+            const now = new Date();
+            const timeString = now.toLocaleString('ja-JP');
+            document.getElementById('currentTime').textContent = timeString;
+        }
+
+        // ページ読み込み時に時刻を表示
+        document.addEventListener('DOMContentLoaded', updateCurrentTime);
+    </script>
+</body>
+</html>

@@ -1,3 +1,4 @@
+version: '3'
 services:
   lei-driving-report:
     build:
@@ -37,15 +38,7 @@ services:
     # 環境変数ファイルを読み込み
     env_file:
       - .env
-    
-    # ヘルスチェック
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-    
+       
     # 再起動ポリシー
     restart: unless-stopped
 

@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, session, send_file
+from flask import Flask, render_template, request, redirect, url_for, session, send_file, flash, jsonify
 import os
 
 # .envファイルから環境変数を読み込み
@@ -16,17 +16,14 @@ if os.environ.get('OAUTHLIB_INSECURE_TRANSPORT', '0') == '1':
 import datetime
 import csv
 import re
-import json
 import tempfile
 import sqlite3
 import hashlib
 from typing import List, Dict, Any, Optional, Tuple
-from dateutil.relativedelta import relativedelta
 
 # Google API libraries
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
-from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 import googlemaps
 
@@ -40,7 +37,7 @@ MAX_DAYS_RANGE = 365  # 最大1年間の範囲制限
 
 # リバースジオコーディングキャッシュの設定
 CACHE_DB_FILE = os.environ.get('CACHE_DB_PATH', 'geocoding_cache.db')
-CACHE_PRECISION = 5  # 座標の精度（小数点以下の桁数）
+CACHE_PRECISION = 4  # 座標の精度（小数点以下の桁数）
 
 # OAuth設定
 CLIENT_SECRETS_FILE = 'credentials.json'
@@ -232,6 +229,75 @@ def download_csv():
     
     return response
 
+@app.route('/cache')
+def cache_management():
+    """キャッシュ管理ページを表示"""
+    if 'credentials' not in session:
+        return redirect(url_for('authorize'))
+    
+    try:
+        # ページネーションパラメータ
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 20, type=int)
+        
+        # キャッシュエントリを取得
+        cache_entries, total_count = get_cache_entries_paginated(page, per_page)
+        total_pages = (total_count + per_page - 1) // per_page
+        
+        print(f"Retrieved {len(cache_entries)} cache entries (page {page}/{total_pages})")
+        return render_template('cache.html', 
+                               cache_entries=cache_entries,
+                               current_page=page,
+                               total_pages=total_pages,
+                               total_count=total_count,
+                               per_page=per_page)
+    except Exception as e:
+        print(f"Error in cache_management: {e}")
+        return f"Error: {e}", 500
+
+@app.route('/cache/delete/<cache_id>', methods=['POST'])
+def delete_cache_entry(cache_id):
+    """キャッシュエントリを削除"""
+    if 'credentials' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    success = delete_cache_by_hash(cache_id)
+    if success:
+        flash('キャッシュエントリを削除しました', 'success')
+        return jsonify({'success': True})
+    else:
+        return jsonify({'error': 'Failed to delete cache entry'}), 500
+
+@app.route('/cache/update/<cache_id>', methods=['POST'])
+def update_cache_entry(cache_id):
+    """キャッシュエントリの住所を更新"""
+    if 'credentials' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    new_address = (request.json or {}).get('address', '').strip()
+    if not new_address:
+        return jsonify({'error': 'Address cannot be empty'}), 400
+    
+    success = update_cache_address(cache_id, new_address)
+    if success:
+        flash('住所を更新しました', 'success')
+        return jsonify({'success': True})
+    else:
+        return jsonify({'error': 'Failed to update cache entry'}), 500
+
+@app.route('/cache/clear', methods=['POST'])
+def clear_all_cache():
+    """全キャッシュを削除"""
+    if 'credentials' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    success = clear_cache_database()
+    if success:
+        flash('全てのキャッシュを削除しました', 'success')
+        return jsonify({'success': True})
+    else:
+        return jsonify({'error': 'Failed to clear cache'}), 500
+
 def get_first_and_last_day_of_month():
     """Get the first and last day of the current month with UTC timezone."""
     today = datetime.datetime.now(datetime.timezone.utc)
@@ -324,6 +390,126 @@ def cache_address(lat: float, lng: float, address: str):
         print(f"Cached address for coordinates ({lat}, {lng}): {address}")
     except Exception as e:
         print(f"Error caching address: {e}")
+
+def get_all_cache_entries() -> List[Dict[str, Any]]:
+    """Get all cache entries for management interface."""
+    try:
+        conn = sqlite3.connect(CACHE_DB_FILE)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT coordinate_hash, latitude, longitude, address, created_at
+            FROM geocoding_cache
+            ORDER BY created_at DESC
+        ''')
+        
+        entries = []
+        for row in cursor.fetchall():
+            entries.append({
+                'hash': row[0],
+                'latitude': row[1],
+                'longitude': row[2],
+                'address': row[3],
+                'created_at': row[4]
+            })
+        
+        conn.close()
+        return entries
+    except Exception as e:
+        print(f"Error getting cache entries: {e}")
+        return []
+
+def get_cache_entries_paginated(page: int, per_page: int) -> Tuple[List[Dict[str, Any]], int]:
+    """Get paginated cache entries for management interface."""
+    try:
+        conn = sqlite3.connect(CACHE_DB_FILE)
+        cursor = conn.cursor()
+        
+        # 総数を取得
+        cursor.execute('SELECT COUNT(*) FROM geocoding_cache')
+        total_count = cursor.fetchone()[0]
+        
+        # ページネーション付きでデータを取得
+        offset = (page - 1) * per_page
+        cursor.execute('''
+            SELECT coordinate_hash, latitude, longitude, address, created_at
+            FROM geocoding_cache
+            ORDER BY created_at DESC
+            LIMIT ? OFFSET ?
+        ''', (per_page, offset))
+        
+        entries = []
+        for row in cursor.fetchall():
+            entries.append({
+                'hash': row[0],
+                'latitude': row[1],
+                'longitude': row[2],
+                'address': row[3],
+                'created_at': row[4]
+            })
+        
+        conn.close()
+        return entries, total_count
+    except Exception as e:
+        print(f"Error getting paginated cache entries: {e}")
+        return [], 0
+
+def delete_cache_by_hash(coordinate_hash: str) -> bool:
+    """Delete a cache entry by its hash."""
+    try:
+        conn = sqlite3.connect(CACHE_DB_FILE)
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            'DELETE FROM geocoding_cache WHERE coordinate_hash = ?',
+            (coordinate_hash,)
+        )
+        
+        conn.commit()
+        affected_rows = cursor.rowcount
+        conn.close()
+        
+        return affected_rows > 0
+    except Exception as e:
+        print(f"Error deleting cache entry: {e}")
+        return False
+
+def update_cache_address(coordinate_hash: str, new_address: str) -> bool:
+    """Update the address for a cache entry."""
+    try:
+        conn = sqlite3.connect(CACHE_DB_FILE)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            UPDATE geocoding_cache 
+            SET address = ?, created_at = CURRENT_TIMESTAMP
+            WHERE coordinate_hash = ?
+        ''', (new_address, coordinate_hash))
+        
+        conn.commit()
+        affected_rows = cursor.rowcount
+        conn.close()
+        
+        return affected_rows > 0
+    except Exception as e:
+        print(f"Error updating cache entry: {e}")
+        return False
+
+def clear_cache_database() -> bool:
+    """Clear all cache entries."""
+    try:
+        conn = sqlite3.connect(CACHE_DB_FILE)
+        cursor = conn.cursor()
+        
+        cursor.execute('DELETE FROM geocoding_cache')
+        
+        conn.commit()
+        conn.close()
+        
+        return True
+    except Exception as e:
+        print(f"Error clearing cache: {e}")
+        return False
 
 def parse_event_title(title: str) -> Tuple[Optional[float], Optional[float]]:
     """Parse distance and fuel efficiency from event title."""
