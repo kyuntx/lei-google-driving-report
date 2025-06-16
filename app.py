@@ -1,6 +1,10 @@
 from flask import Flask, render_template, request, redirect, url_for, session, send_file
 import os
-os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1' 
+
+# セキュリティ設定：開発環境でのHTTP使用を環境変数で制御
+# 本番環境では '0' または未設定にしてHTTPSを強制すること
+if os.environ.get('OAUTHLIB_INSECURE_TRANSPORT', '0') == '1':
+    os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1' 
 import datetime
 import csv
 import re
