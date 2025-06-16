@@ -16,6 +16,10 @@ __pycache__/
 *.pyo
 *.pyd
 
+# リバースジオコーディングキャッシュデータベース
+geocoding_cache.db
+*.db
+
 # ログファイル
 *.log
 logs/

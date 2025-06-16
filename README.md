@@ -11,6 +11,7 @@ Google CalendarとGoogle Maps APIを連携して、Yupiteru レーダー探知�
 - **Google OAuth2認証**: Google Calendar APIへの安全なアクセス
 - **運転ログ自動抽出**: カレンダーイベントから運転データを自動抽出
 - **住所変換**: GPS座標を住所に変換（Google Maps Reverse Geocoding API使用）
+- **🆕 インテリジェントキャッシュ**: 同一座標のリバースジオコーディング結果をキャッシュしてAPI使用量を削減
 - **運転日報表示**: ブラウザ上で見やすい表形式で表示
 - **CSV エクスポート**: Excel互換のShift_JIS形式でCSVダウンロード
 
@@ -111,6 +112,12 @@ docker-compose ps
 
 # ログ確認
 docker-compose logs lei-driving-report
+
+# キャッシュボリュームの確認
+docker volume ls
+
+# キャッシュボリュームの削除（キャッシュをリセットする場合）
+docker volume rm lei-google-driving-report_geocoding_cache
 ```
 
 アプリケーションは `http://localhost:5000` で起動します。
@@ -179,12 +186,34 @@ lei-google-driving-report/
 └── README.md           # このファイル
 ```
 
+## 🆕 キャッシュ機能について
+
+### リバースジオコーディングキャッシュ
+
+アプリケーションは、Google Maps APIの使用料削減のため、リバースジオコーディング結果を自動的にキャッシュします。
+
+**特徴：**
+- **永続キャッシュ**: SQLiteデータベース（`geocoding_cache.db`）を使用した永続的なキャッシュ
+- **座標の丸め**: 小数点以下4桁の精度（約11m）で座標を丸めてキャッシュ効率を向上
+- **自動管理**: 同一座標範囲での重複API呼び出しを自動的に回避
+- **コスト削減**: 頻繁に訪問する場所のAPI使用量を大幅に削減
+
+**動作：**
+1. 初回アクセス時：Google Maps APIを呼び出して住所を取得し、結果をキャッシュ
+2. 2回目以降：キャッシュから高速で住所を取得、API呼び出しなし
+
+**キャッシュファイル：**
+- `geocoding_cache.db` - Gitリポジトリから除外済み
+- 削除すると次回実行時に再構築されます
+- Docker環境では名前付きボリューム `geocoding_cache` として永続化
+
 ## 注意事項
 
 - `credentials.json`ファイルは機密情報のため、リポジトリには含まれていません
 - 本番環境では、`app.py`の`secret_key`を環境変数から取得するよう変更してください
-- Google Maps APIの使用には料金が発生する場合があります
+- Google Maps APIの使用には料金が発生する場合がありますが、キャッシュ機能により削減されます
 - CSVファイルはShift_JIS形式でエクスポートされ、日本語版Excelで正しく表示されます
+- キャッシュデータベース（`geocoding_cache.db`）は自動的に作成・管理されます
 
 ## ライセンス
 

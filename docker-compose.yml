@@ -14,6 +14,9 @@ services:
       # OAuth設定（開発環境用）
       - OAUTHLIB_INSECURE_TRANSPORT=${OAUTHLIB_INSECURE_TRANSPORT:-1}
       
+      # キャッシュデータベース設定
+      - CACHE_DB_PATH=/app/cache/geocoding_cache.db
+      
       # タイムゾーン設定
       - TZ=Asia/Tokyo
     
@@ -27,6 +30,9 @@ services:
       
       # ログ出力用
       - ./logs:/app/logs
+      
+      # キャッシュデータベースの永続化
+      - geocoding_cache:/app/cache
     
     # 環境変数ファイルを読み込み
     env_file:
@@ -42,4 +48,9 @@ services:
     
     # 再起動ポリシー
     restart: unless-stopped
+
+# 名前付きボリューム定義
+volumes:
+  geocoding_cache:
+    driver: local
     

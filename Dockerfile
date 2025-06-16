@@ -27,6 +27,9 @@ COPY app.py .
 COPY templates/ templates/
 COPY CLAUDE.md .
 
+# キャッシュディレクトリを作成
+RUN mkdir -p /app/cache
+
 # 非rootユーザーを作成してセキュリティを向上
 RUN groupadd -r appgroup && useradd -r -g appgroup appuser
 

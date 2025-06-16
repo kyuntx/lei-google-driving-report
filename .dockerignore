@@ -37,6 +37,10 @@ token.json
 .env.local
 .env.production
 
+# キャッシュデータベース
+geocoding_cache.db
+*.db
+
 # 一時ファイル
 *.tmp
 *.temp

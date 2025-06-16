@@ -18,6 +18,8 @@ import csv
 import re
 import json
 import tempfile
+import sqlite3
+import hashlib
 from typing import List, Dict, Any, Optional, Tuple
 from dateutil.relativedelta import relativedelta
 
@@ -35,6 +37,10 @@ app.secret_key = os.environ.get('SECRET_KEY', 'your_secret_key_change_this_in_pr
 # DoS攻撃対策：イベント取得数の制限
 MAX_EVENTS = 1000
 MAX_DAYS_RANGE = 365  # 最大1年間の範囲制限
+
+# リバースジオコーディングキャッシュの設定
+CACHE_DB_FILE = os.environ.get('CACHE_DB_PATH', 'geocoding_cache.db')
+CACHE_PRECISION = 5  # 座標の精度（小数点以下の桁数）
 
 # OAuth設定
 CLIENT_SECRETS_FILE = 'credentials.json'
@@ -236,6 +242,89 @@ def get_first_and_last_day_of_month():
         last_day = datetime.datetime(today.year, today.month + 1, 1, tzinfo=datetime.timezone.utc) - datetime.timedelta(days=1)
     return first_day, last_day
 
+def init_cache_db():
+    """Initialize the geocoding cache database."""
+    conn = sqlite3.connect(CACHE_DB_FILE)
+    cursor = conn.cursor()
+    
+    # キャッシュテーブルを作成（存在しない場合）
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS geocoding_cache (
+            coordinate_hash TEXT PRIMARY KEY,
+            latitude REAL NOT NULL,
+            longitude REAL NOT NULL,
+            address TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    # インデックスを作成（パフォーマンス向上）
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_coordinates 
+        ON geocoding_cache(latitude, longitude)
+    ''')
+    
+    conn.commit()
+    conn.close()
+
+def get_coordinate_hash(lat: float, lng: float) -> str:
+    """Generate a hash for coordinates with specified precision."""
+    # 指定された精度に丸める
+    rounded_lat = round(lat, CACHE_PRECISION)
+    rounded_lng = round(lng, CACHE_PRECISION)
+    
+    # ハッシュを生成
+    coord_string = f"{rounded_lat},{rounded_lng}"
+    return hashlib.md5(coord_string.encode()).hexdigest()
+
+def get_cached_address(lat: float, lng: float) -> Optional[str]:
+    """Get cached address for coordinates."""
+    try:
+        conn = sqlite3.connect(CACHE_DB_FILE)
+        cursor = conn.cursor()
+        
+        coord_hash = get_coordinate_hash(lat, lng)
+        cursor.execute(
+            'SELECT address FROM geocoding_cache WHERE coordinate_hash = ?',
+            (coord_hash,)
+        )
+        
+        result = cursor.fetchone()
+        conn.close()
+        
+        if result:
+            print(f"Cache hit for coordinates ({lat}, {lng})")
+            return result[0]
+        
+        return None
+    except Exception as e:
+        print(f"Error accessing cache: {e}")
+        return None
+
+def cache_address(lat: float, lng: float, address: str):
+    """Cache address for coordinates."""
+    try:
+        conn = sqlite3.connect(CACHE_DB_FILE)
+        cursor = conn.cursor()
+        
+        coord_hash = get_coordinate_hash(lat, lng)
+        rounded_lat = round(lat, CACHE_PRECISION)
+        rounded_lng = round(lng, CACHE_PRECISION)
+        
+        # INSERT OR REPLACE を使用してキャッシュを更新
+        cursor.execute('''
+            INSERT OR REPLACE INTO geocoding_cache 
+            (coordinate_hash, latitude, longitude, address, created_at)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ''', (coord_hash, rounded_lat, rounded_lng, address))
+        
+        conn.commit()
+        conn.close()
+        
+        print(f"Cached address for coordinates ({lat}, {lng}): {address}")
+    except Exception as e:
+        print(f"Error caching address: {e}")
+
 def parse_event_title(title: str) -> Tuple[Optional[float], Optional[float]]:
     """Parse distance and fuel efficiency from event title."""
     # 修正した正規表現パターン - 整数部分が0の場合も対応し、km/lを含む
@@ -245,7 +334,7 @@ def parse_event_title(title: str) -> Tuple[Optional[float], Optional[float]]:
     return None, None
 
 def get_address_from_location(gmaps_client: Any, location: str) -> str:
-    """Convert coordinates to address using Google Maps reverse geocoding."""
+    """Convert coordinates to address using Google Maps reverse geocoding with caching."""
     if not location:
         return "不明"  # Unknown
     
@@ -257,7 +346,13 @@ def get_address_from_location(gmaps_client: Any, location: str) -> str:
         
         lat, lng = float(coord_match.group(1)), float(coord_match.group(2))
         
-        # Reverse geocode coordinates to address with language parameter
+        # キャッシュから住所を取得を試行
+        cached_address = get_cached_address(lat, lng)
+        if cached_address:
+            return cached_address
+        
+        # キャッシュにない場合はGoogle Maps APIを使用
+        print(f"Cache miss for coordinates ({lat}, {lng}) - calling Google Maps API")
         reverse_geocode_result = gmaps_client.reverse_geocode(
             (lat, lng),
             language="ja"
@@ -270,6 +365,9 @@ def get_address_from_location(gmaps_client: Any, location: str) -> str:
             # 「日本、〒XXX-XXXX 」の部分を削除
             formatted_address = re.sub(r'^日本、\s*', '', formatted_address)
             formatted_address = re.sub(r'〒\d{3}-\d{4}\s*', '', formatted_address)
+            
+            # 結果をキャッシュに保存
+            cache_address(lat, lng, formatted_address)
             
             return formatted_address
             
@@ -416,6 +514,10 @@ def export_to_csv(logs: List[Dict[str, Any]], file) -> None:
             f.write(shift_jis_content)
 
 if __name__ == '__main__':
+    # キャッシュデータベースを初期化
+    init_cache_db()
+    print("📝 リバースジオコーディングキャッシュデータベースを初期化しました")
+    
     # セキュリティ：本番環境では環境変数でデバッグモードを制御
     debug_mode = os.environ.get('DEBUG', 'True').lower() == 'true'
     
