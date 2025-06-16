@@ -1,6 +1,6 @@
 # Lei03/Lei03+/Lei04 運転日報ジェネレータ
 
-Google CalendarとGoogle Maps APIを連携して、Yupiteru Leiレーダー探知機（Lei03/Lei03+/Lei04）向けの運転日報を自動生成するFlaskアプリケーションです。
+Google CalendarとGoogle Maps APIを連携して、Yupiteru レーダー探知機 霧島レイモデル（Lei03/Lei03+/Lei04）向けの運転日報を自動生成します。
 
 ## 概要
 
@@ -30,6 +30,7 @@ google-auth-oauthlib
 google-api-python-client
 googlemaps
 python-dateutil
+python-dotenv
 ```
 
 ## セットアップ
@@ -191,4 +192,6 @@ lei-google-driving-report/
 
 ## サポート
 
-Yupiteru Lei レーダー探知機のGoogle Calendar連携機能については、製品のマニュアルを参照してください。
+- Yupiteru レーダー探知機 霧島レイモデル のGoogle Calendar連携機能については、製品のマニュアルを参照してください。
+- 霧島レイモデル以外のYupiteru製レーダー探知機でも利用できる可能性がありますが、未検証です。
+- Lei01,Lei02,Lei05,Lei06,Sakura01,LeiLite,H6-Lei01/Sakura01/Chacha01はGoogleカレンダー連携機能がないため非対応です。（実装求む！）

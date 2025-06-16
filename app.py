@@ -426,4 +426,4 @@ if __name__ == '__main__':
     if debug_mode:
         print("🔧 開発モードで実行中 - 本番環境では DEBUG=False を設定してください")
     
-    app.run(debug=debug_mode, host='127.0.0.1', port=5000)
+    app.run(debug=debug_mode, host='0.0.0.0', port=5000)
