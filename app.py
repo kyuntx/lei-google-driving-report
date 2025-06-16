@@ -17,7 +17,12 @@ from googleapiclient.discovery import build
 import googlemaps
 
 app = Flask(__name__)
-app.secret_key = 'your_secret_key'  # セッション管理用の秘密鍵
+# セキュリティ強化：環境変数から秘密鍵を取得
+app.secret_key = os.environ.get('SECRET_KEY', 'your_secret_key_change_this_in_production')
+
+# DoS攻撃対策：イベント取得数の制限
+MAX_EVENTS = 1000
+MAX_DAYS_RANGE = 365  # 最大1年間の範囲制限
 
 # OAuth設定
 CLIENT_SECRETS_FILE = 'credentials.json'
@@ -102,23 +107,53 @@ def generate_report():
     # フォームからパラメータを取得
     start_date = request.form.get('start_date')
     end_date = request.form.get('end_date')
-    calendar_id = request.form.get('calendar_id')
-    maps_api_key = request.form.get('maps_api_key')
+    calendar_id = request.form.get('calendar_id', '').strip()
+    maps_api_key = request.form.get('maps_api_key', '').strip()
     
+    # 入力値検証
     if not maps_api_key:
         return render_template('index.html', 
                               authenticated=True, 
                               error="Google Maps APIキーが必要です")
     
-    # 日付範囲の設定
+    # セキュリティ：APIキーの長さをチェック
+    if len(maps_api_key) < 10 or len(maps_api_key) > 100:
+        return render_template('index.html', 
+                              authenticated=True, 
+                              error="Google Maps APIキーの形式が正しくありません")
+    
+    # 日付範囲の設定（UTCタイムゾーンを追加）
     if start_date and end_date:
-        start_date = datetime.datetime.strptime(start_date, '%Y-%m-%d')
-        end_date = datetime.datetime.strptime(end_date, '%Y-%m-%d')
-        end_date = end_date.replace(hour=23, minute=59, second=59)
+        try:
+            start_date = datetime.datetime.strptime(start_date, '%Y-%m-%d')
+            end_date = datetime.datetime.strptime(end_date, '%Y-%m-%d')
+            end_date = end_date.replace(hour=23, minute=59, second=59)
+            
+            # DoS攻撃対策：日付範囲をチェック
+            date_range = (end_date - start_date).days
+            if date_range < 0:
+                return render_template('index.html', 
+                                      authenticated=True, 
+                                      error="開始日は終了日より前の日付にしてください")
+            if date_range > MAX_DAYS_RANGE:
+                return render_template('index.html', 
+                                      authenticated=True, 
+                                      error=f"日付範囲は{MAX_DAYS_RANGE}日以内にしてください")
+            
+            # UTCタイムゾーンを追加
+            start_date = start_date.replace(tzinfo=datetime.timezone.utc)
+            end_date = end_date.replace(tzinfo=datetime.timezone.utc)
+        except ValueError:
+            return render_template('index.html', 
+                                  authenticated=True, 
+                                  error="日付の形式が正しくありません")
     else:
         # デフォルトは当月
         start_date, end_date = get_first_and_last_day_of_month()
         end_date = end_date.replace(hour=23, minute=59, second=59)
+        # UTCタイムゾーンを追加
+        start_date = start_date.replace(tzinfo=datetime.timezone.utc)
+        end_date = end_date.replace(tzinfo=datetime.timezone.utc)
     
     # Google サービスの認証
     credentials = Credentials(**session['credentials'])
@@ -180,13 +215,13 @@ def download_csv():
     return response
 
 def get_first_and_last_day_of_month():
-    """Get the first and last day of the current month."""
-    today = datetime.datetime.now()
-    first_day = datetime.datetime(today.year, today.month, 1)
+    """Get the first and last day of the current month with UTC timezone."""
+    today = datetime.datetime.now(datetime.timezone.utc)
+    first_day = datetime.datetime(today.year, today.month, 1, tzinfo=datetime.timezone.utc)
     if today.month == 12:
-        last_day = datetime.datetime(today.year + 1, 1, 1) - datetime.timedelta(days=1)
+        last_day = datetime.datetime(today.year + 1, 1, 1, tzinfo=datetime.timezone.utc) - datetime.timedelta(days=1)
     else:
-        last_day = datetime.datetime(today.year, today.month + 1, 1) - datetime.timedelta(days=1)
+        last_day = datetime.datetime(today.year, today.month + 1, 1, tzinfo=datetime.timezone.utc) - datetime.timedelta(days=1)
     return first_day, last_day
 
 def parse_event_title(title: str) -> Tuple[Optional[float], Optional[float]]:
@@ -236,20 +271,54 @@ def get_driving_logs(start_date: datetime.datetime, end_date: datetime.datetime,
     """Retrieve driving logs from Google Calendar."""
     logs = []
     
-    # カレンダーIDを指定してイベントを取得
-    events_result = calendar_service.events().list(
-        calendarId=calendar_id,
-        timeMin=start_date.isoformat() + 'Z',  # 'Z' indicates UTC time
-        timeMax=end_date.isoformat() + 'Z',
-        singleEvents=True,
-        orderBy='startTime'
-    ).execute()
+    # 指定期間より前の最後のイベントを取得するため、より広い範囲でイベントを取得
+    # 7日前から取得して、期間外の直前のイベントを見つける
+    extended_start_date = start_date - datetime.timedelta(days=7)
+    
+    # 日付を正しいUTCフォーマットに変換（タイムゾーン情報を除いてZを追加）
+    extended_start_str = extended_start_date.strftime('%Y-%m-%dT%H:%M:%S') + 'Z'
+    end_date_str = end_date.strftime('%Y-%m-%dT%H:%M:%S') + 'Z'
+    
+    try:
+        # カレンダーIDを指定してイベントを取得（拡張期間）
+        # DoS攻撃対策：取得イベント数を制限
+        events_result = calendar_service.events().list(
+            calendarId=calendar_id,
+            timeMin=extended_start_str,
+            timeMax=end_date_str,
+            singleEvents=True,
+            orderBy='startTime',
+            maxResults=MAX_EVENTS
+        ).execute()
+    except Exception as e:
+        print(f"Error fetching calendar events: {e}")
+        return []
     
     events = events_result.get('items', [])
     
+    # 指定期間外の直前のイベントを見つける
     previous_event = None
-    
     for event in events:
+        event_start = event['start'].get('dateTime')
+        if event_start and '距離' in event.get('summary', ''):
+            event_start_dt = datetime.datetime.fromisoformat(event_start.replace('Z', '+00:00'))
+            if event_start_dt < start_date:
+                previous_event = event  # 期間前の最後の運転イベント
+            else:
+                break  # 指定期間に入ったので終了
+    
+    # 指定期間内のイベントのみを処理
+    for event in events:
+        event_start = event['start'].get('dateTime')
+        if not event_start:
+            continue
+            
+        event_start_dt = datetime.datetime.fromisoformat(event_start.replace('Z', '+00:00'))
+        
+        # 指定期間内のイベントのみを処理
+        if event_start_dt < start_date or event_start_dt > end_date:
+            continue
+            
         # Check if event title matches the driving log pattern
         if '距離' in event.get('summary', ''):
             distance, fuel_efficiency = parse_event_title(event.get('summary', ''))
@@ -288,9 +357,9 @@ def get_driving_logs(start_date: datetime.datetime, end_date: datetime.datetime,
                     'origin_location': origin_location,    # 元の位置情報を追加
                     'destination_location': raw_location   # 元の位置情報を追加
                 })
-            
-        # Update previous event
-        previous_event = event
+                
+                # Update previous event for next iteration
+                previous_event = event
     
     return logs
 
@@ -335,5 +404,14 @@ def export_to_csv(logs: List[Dict[str, Any]], file) -> None:
             f.write(shift_jis_content)
 
 if __name__ == '__main__':
-    # デバッグモードで実行（本番環境ではFalseにする）
-    app.run(debug=True)
+    # セキュリティ：本番環境では環境変数でデバッグモードを制御
+    debug_mode = os.environ.get('DEBUG', 'True').lower() == 'true'
+    
+    # セキュリティ警告
+    if debug_mode and app.secret_key == 'your_secret_key_change_this_in_production':
+        print("⚠️  警告: デフォルトのシークレットキーを使用しています。本番環境では必ず変更してください。")
+    
+    if debug_mode:
+        print("🔧 開発モードで実行中 - 本番環境では DEBUG=False を設定してください")
+    
+    app.run(debug=debug_mode, host='127.0.0.1', port=5000)
